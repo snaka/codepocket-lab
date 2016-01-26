@@ -57,64 +57,71 @@
           // セルの1辺のサイズ
           var CELL_SIZE = 15;
 
+          // ラベルの高さ
+          var LABEL_HEIGHT = 11;
+
           // カレンダ表示のマージン
           var MARGIN_LEFT = 25;
           var MARGIN_TOP = 15;
 
-          var dataset = null;
-          var color = null;
-          var countScale = null;
-
-          // 日付の計算
-          var addDays = function(sourceDate, days) {
-            result = new Date(sourceDate);
-            result.setDate(sourceDate.getDate() + days);
-            return result;
-          };
-
           // 表示する日付の範囲(過去１年間)
-          var rangeBegin = addDays(new Date, -365);
+          var rangeBegin = d3.time.day.offset(new Date, -365);
           var rangeEnd = new Date;
           var dateRange = d3.time.days(rangeBegin, rangeEnd);
           var monthRange = d3.time.months(rangeBegin, rangeEnd);
 
-          // カレンダのオフセット値を算出する関数
-          var createOffsetFunc = function() {
+          // 矩形のX座標のオフセット値を算出する関数
+          var offsetX = (function() {
             var firstYearOffset = d3.time.weekOfYear(rangeBegin) * -1;
             var bounderyDate = d3.time.years(rangeBegin, rangeEnd)[0];
-            var lastDayOfFirstYear = addDays(bounderyDate, -1);
+            var lastDayOfFirstYear = d3.time.day.offset(bounderyDate, -1);
             var lastWeekOfFirstYear = d3.time.weekOfYear(lastDayOfFirstYear);
             var lastYearOffset = d3.time.weekOfYear(lastDayOfFirstYear) + firstYearOffset;
+
             return function(sourceDate) {
               if (sourceDate.getFullYear() == rangeBegin.getFullYear())
                 return firstYearOffset;
               return lastYearOffset;
             }
-          };
+          })();
 
           // メイン処理:カレンダー描画
-          return function(dataset) {
-            // 件数を3段階に分類
+          return function(originalDataset) {
+
+            // Objectをkeyでフィルタする関数
+            function objectFilter(obj, predicate) {
+              var result = {}, key;
+              for (key in obj) {
+                if (obj.hasOwnProperty(key) && predicate(key, obj[key])) {
+                  result[key] = obj[key];
+                }
+              }
+              return result;
+            }
+
+            var dataset = objectFilter(originalDataset, function(k, v) {
+              var aDay = new Date(k);
+              return rangeBegin <= aDay && aDay <= d3.time.day.offset(rangeEnd, 1);
+            });
+
+            // 件数を3段階に分類するスケール関数
             var countScale = d3.scale.linear()
                              .domain([1, d3.max(d3.values(dataset))])
                              .rangeRound([1, 3])    // 3段階で色分け
                              .clamp(true);
-            // 分類ごとに色分け
+            // 段階ごとに色分け
+            // Thanks to colorbrew (http://colorbrewer2.org/)
             var colorScale = d3.scale.ordinal()
                              .domain([1, 2, 3])
                              .range(["#f7fcb9","#addd8e","#31a354"]);
-            // 上記をまとめるスケール関数
-            var color = function(f) {
-              return colorScale(countScale(f));
-            };
+            var color = function(f) { return colorScale(countScale(f)); }
 
-            // svg要素の作成
+            // svg要素を選択
             var svg = d3.select(".weed");
             svg.selectAll("*").remove();
             svg.append("g");
 
             // 日毎の矩形を生成
-            var offset = createOffsetFunc();
             var rect = svg.selectAll(".day")
                       .data(dateRange)
                       .enter()
@@ -122,31 +129,27 @@
                         .attr("class", "day")
                         .attr("width", CELL_SIZE - 1)
                         .attr("height", CELL_SIZE - 1)
-                        .attr("x", function(d){ return (d3.time.weekOfYear(d) + offset(d)) * CELL_SIZE + MARGIN_LEFT; })
+                        .attr("x", function(d){ return (d3.time.weekOfYear(d) + offsetX(d)) * CELL_SIZE + MARGIN_LEFT; })
                         .attr("y", function(d){ return d.getDay() * CELL_SIZE + MARGIN_TOP; })
-                        .attr("fill", "rgb(230,230,230)")
+                        .attr("fill", "#e6e6e6")
                       .datum(format);
-
-            // ツールチップ設定
-            rect.append("title")
-                .text(function(d){ return d; });
 
             // 投稿のあった日のツールチップと背景色を設定
             rect.filter(function(d){ return d in dataset; })
-                .attr("fill", function(d){ return color(dataset[d]); })
-                .select("title")
-                .text(function(d){ return d + " (投稿:" + dataset[d] + "件)"; });
+                .attr("fill", function(d){ return colorScale(countScale(dataset[d])); })
+                .append("title")
+                  .text(function(d){ return d + " (投稿:" + dataset[d] + "件)"; });
 
             // 曜日のラベル
             dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
             svg.selectAll(".dayLabel")
-               .data([0, 1, 2, 3, 4, 5, 6])
+               .data(d3.range(7))
                .enter()
                .append("text")
                  .attr("class", "dayLabel")
                  .attr("x", 0)
-                 .attr("y", function(d){ return d * CELL_SIZE + 11 + MARGIN_TOP; })
-                 .attr("font-size", 11)
+                 .attr("y", function(d){ return d * CELL_SIZE + LABEL_HEIGHT + MARGIN_TOP; })
+                 .attr("font-size", LABEL_HEIGHT)
                  .attr("fill", "gray")
                  .text(function(d){ return dayLabels[d]; });
 
@@ -157,9 +160,9 @@
               .enter()
               .append("text")
                 .attr("class", "monthLabel")
-                .attr("x", function(d){ return (d3.time.weekOfYear(d) + offset(d)) * CELL_SIZE + MARGIN_LEFT; })
-                .attr("y", 11)
-                .attr("font-size", 11)
+                .attr("x", function(d){ return (d3.time.weekOfYear(d) + offsetX(d)) * CELL_SIZE + MARGIN_LEFT; })
+                .attr("y", LABEL_HEIGHT)
+                .attr("font-size", LABEL_HEIGHT)
                 .attr("fill", "gray")
                 .text(function(d){ return monthLabels[d.getMonth()]; });
           }
